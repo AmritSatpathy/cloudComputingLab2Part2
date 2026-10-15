@@ -1,0 +1,22 @@
+# Local Python virtual env (only used for running tests locally)
+.venv/
+
+# Runtime state written by the deploy scripts (contains instance/API IDs)
+scripts/.stack-state
+
+# EC2 private key downloaded by deploy-spark-ec2.sh — never commit secrets
+scripts/*.pem
+
+# Windows "Zone.Identifier" alternate-data-stream files
+*Zone.Identifier
+
+# Python caches
+__pycache__/
+*.pyc
+
+# Submission report — kept/submitted separately, not part of the pushed repo
+REPORT_Part2.md
+*.pdf
+
+# Dataset — provided by the course; not redistributed in the repo
+twitter_combined.txt

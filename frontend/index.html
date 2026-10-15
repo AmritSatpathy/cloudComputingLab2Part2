@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<!--
+  Front-end for Lab 2 Part 2.
+
+  Role: this is the "front-end" graded component. It calls the back-end API
+  (API Gateway -> Lambda) and renders each user's follower/followee counts in
+  the format the lab asks for ("UserID has N followers / followees"), with the
+  two required users (214328887 and 107830991) highlighted as cards up top and
+  the full set shown in a searchable table.
+
+  Setup: a single static HTML file (vanilla HTML/CSS/JS, no framework or build
+  step) hosted on S3 static website hosting. The API base URL is injected at
+  deploy time by deploy-frontend.sh, which rewrites the API_BASE placeholder.
+  Data is fetched with the browser fetch() API.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Twitter Follower / Followee Counts</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --bg2: #1e293b;
+      --card: #ffffff;
+      --ink: #0f172a;
+      --muted: #64748b;
+      --accent: #2563eb;
+      --accent-soft: #dbeafe;
+      --followers: #2563eb;
+      --followees: #7c3aed;
+      --line: #e2e8f0;
+      --shadow: 0 1px 3px rgba(15, 23, 42, .08), 0 8px 24px rgba(15, 23, 42, .06);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      color: var(--ink);
+      background: #f1f5f9;
+      line-height: 1.5;
+    }
+
+    /* Header band */
+    header {
+      background: linear-gradient(135deg, var(--bg) 0%, var(--bg2) 100%);
+      color: #fff;
+      padding: 2.5rem 1.5rem 2rem;
+    }
+    .wrap { max-width: 860px; margin: 0 auto; }
+    header h1 { margin: 0 0 .35rem; font-size: 1.6rem; letter-spacing: -.02em; }
+    header p { margin: 0; color: #cbd5e1; font-size: .95rem; }
+    .pill {
+      display: inline-block; margin-top: 1rem; padding: .3rem .7rem;
+      background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.18);
+      border-radius: 999px; font-size: .78rem; color: #e2e8f0;
+    }
+
+    main { max-width: 860px; margin: -1.25rem auto 3rem; padding: 0 1.5rem; }
+
+    section { margin-top: 2rem; }
+    h2 { font-size: 1.05rem; margin: 0 0 .9rem; letter-spacing: -.01em; }
+    .sub { color: var(--muted); font-size: .85rem; font-weight: 400; }
+
+    /* Required-user cards */
+    .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    @media (max-width: 560px) { .cards { grid-template-columns: 1fr; } }
+    .card {
+      background: var(--card); border: 1px solid var(--line);
+      border-radius: 14px; padding: 1.25rem; box-shadow: var(--shadow);
+    }
+    .card .label { font-size: .75rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+    .card .uid { font-size: 1.35rem; font-weight: 700; margin: .15rem 0 1rem; font-variant-numeric: tabular-nums; }
+    .stat { display: flex; align-items: baseline; justify-content: space-between; padding: .4rem 0; }
+    .stat + .stat { border-top: 1px dashed var(--line); }
+    .stat .n { font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .stat .k { font-size: .8rem; color: var(--muted); }
+    .dot { display: inline-block; width: .55rem; height: .55rem; border-radius: 50%; margin-right: .4rem; vertical-align: middle; }
+    .dot.f { background: var(--followers); }
+    .dot.e { background: var(--followees); }
+
+    /* All-users panel */
+    .panel {
+      background: var(--card); border: 1px solid var(--line);
+      border-radius: 14px; box-shadow: var(--shadow); overflow: hidden;
+    }
+    .toolbar { display: flex; gap: .75rem; align-items: center; padding: 1rem; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+    .toolbar input {
+      flex: 1; min-width: 180px; padding: .55rem .75rem; border: 1px solid var(--line);
+      border-radius: 9px; font-size: .9rem; outline: none;
+    }
+    .toolbar input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+    .counts { font-size: .82rem; color: var(--muted); white-space: nowrap; }
+
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: .65rem 1rem; font-size: .9rem; }
+    th { background: #f8fafc; color: var(--muted); font-weight: 600; font-size: .76rem; text-transform: uppercase; letter-spacing: .05em; position: sticky; top: 0; }
+    td { border-top: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+    td.num { text-align: right; }
+    tr.hl { background: var(--accent-soft); }
+    tr.hl td:first-child { font-weight: 700; }
+    .scroll { max-height: 460px; overflow-y: auto; }
+    .badge { font-size: .68rem; background: var(--accent); color: #fff; border-radius: 999px; padding: .1rem .45rem; margin-left: .4rem; vertical-align: middle; }
+
+    .msg { padding: 1rem; color: var(--muted); font-size: .9rem; }
+    .err { color: #b91c1c; }
+    footer { text-align: center; color: var(--muted); font-size: .8rem; padding: 1.5rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1>Twitter Follower / Followee Counts</h1>
+      <p>Follower and followee totals per user, computed from the Stanford Twitter graph.</p>
+      <span class="pill">PySpark on AWS EC2 &rarr; S3 &rarr; Lambda + API Gateway &rarr; S3 static site</span>
+    </div>
+  </header>
+
+  <main>
+    <!-- The two users the lab specifically asks us to display. -->
+    <section>
+      <h2>Required users <span class="sub">— highlighted for the submission</span></h2>
+      <div class="cards" id="cards">
+        <div class="msg">Loading…</div>
+      </div>
+    </section>
+
+    <section>
+      <h2>All users <span class="sub">— search by user ID</span></h2>
+      <div class="panel">
+        <div class="toolbar">
+          <input id="search" type="search" placeholder="Filter by user ID…" autocomplete="off" />
+          <span class="counts" id="counts"></span>
+        </div>
+        <div class="scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>User ID</th>
+                <th class="num"><span class="dot f"></span>Followers</th>
+                <th class="num"><span class="dot e"></span>Followees</th>
+              </tr>
+            </thead>
+            <tbody id="rows">
+              <tr><td colspan="3" class="msg">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div id="error" class="msg err"></div>
+    </section>
+  </main>
+
+  <footer>Lab 2 Part 2 — Cloud Computing · data served live from AWS</footer>
+
+  <script>
+    // Injected at deploy time by deploy-frontend.sh (replaces the placeholder).
+    const API_BASE = "__API_BASE__";
+
+    // The two user IDs required by the lab.
+    const TARGET_USERS = ["214328887", "107830991"];
+
+    const fmt = (n) => Number(n).toLocaleString();
+
+    // Build one highlighted card for a required user.
+    function card(u) {
+      return `
+        <div class="card">
+          <div class="label">User</div>
+          <div class="uid">${u.userId}</div>
+          <div class="stat">
+            <span class="k"><span class="dot f"></span>has followers</span>
+            <span class="n">${fmt(u.followers)}</span>
+          </div>
+          <div class="stat">
+            <span class="k"><span class="dot e"></span>has followees</span>
+            <span class="n">${fmt(u.followees)}</span>
+          </div>
+        </div>`;
+    }
+
+    // Load the two required users into the cards.
+    async function loadTargets() {
+      const el = document.getElementById("cards");
+      try {
+        const res = await fetch(`${API_BASE}/users?ids=${TARGET_USERS.join(",")}`);
+        if (!res.ok) throw new Error(`API ${res.status}`);
+        const data = await res.json();
+        el.innerHTML = data.users.map(card).join("");
+      } catch (e) {
+        el.innerHTML = `<div class="msg err">Failed to load required users: ${e.message}</div>`;
+      }
+    }
+
+    // Hold the full user list so the search box can filter client-side.
+    let ALL = [];
+
+    function renderRows(filter) {
+      const rows = document.getElementById("rows");
+      const q = (filter || "").trim();
+      const list = q ? ALL.filter((u) => u.userId.includes(q)) : ALL;
+      const shown = list.slice(0, 500); // cap DOM size for performance
+
+      document.getElementById("counts").textContent =
+        `${fmt(list.length)} user${list.length === 1 ? "" : "s"}` +
+        (list.length > shown.length ? ` (showing first ${shown.length})` : "");
+
+      if (shown.length === 0) {
+        rows.innerHTML = `<tr><td colspan="3" class="msg">No users match “${q}”.</td></tr>`;
+        return;
+      }
+      const targetSet = new Set(TARGET_USERS);
+      rows.innerHTML = shown.map((u) => {
+        const hl = targetSet.has(u.userId) ? ' class="hl"' : "";
+        const badge = targetSet.has(u.userId) ? '<span class="badge">required</span>' : "";
+        return `<tr${hl}>
+          <td>${u.userId}${badge}</td>
+          <td class="num">${fmt(u.followers)}</td>
+          <td class="num">${fmt(u.followees)}</td>
+        </tr>`;
+      }).join("");
+    }
+
+    async function loadAll() {
+      try {
+        const res = await fetch(`${API_BASE}/users`);
+        if (!res.ok) throw new Error(`API ${res.status}`);
+        const data = await res.json();
+        // Required users first, then the rest — nicer default ordering.
+        const targetSet = new Set(TARGET_USERS);
+        ALL = data.users.sort((a, b) => {
+          const ta = targetSet.has(a.userId), tb = targetSet.has(b.userId);
+          if (ta !== tb) return ta ? -1 : 1;
+          return b.followers - a.followers; // then by popularity
+        });
+        renderRows("");
+      } catch (e) {
+        document.getElementById("rows").innerHTML =
+          `<tr><td colspan="3" class="msg err">Failed to load users: ${e.message}</td></tr>`;
+      }
+    }
+
+    document.getElementById("search").addEventListener("input", (e) => renderRows(e.target.value));
+
+    loadTargets();
+    loadAll();
+  </script>
+</body>
+</html>
